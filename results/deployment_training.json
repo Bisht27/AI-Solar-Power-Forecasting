@@ -1,0 +1,73 @@
+{
+  "inverter": "1BY6WEcLGh8j5v7",
+  "n_samples": 3152,
+  "features": [
+    "IRRADIATION",
+    "Hour",
+    "MODULE_TEMPERATURE",
+    "AMBIENT_TEMPERATURE",
+    "AC_POWER_LAG1"
+  ],
+  "rf_params": {
+    "n_estimators": 200,
+    "max_depth": 12,
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "validation": {
+    "folds": [
+      {
+        "fold": 1,
+        "train_samples": 527,
+        "test_samples": 525,
+        "mae": 64.15597617493404,
+        "rmse": 124.91961301249368,
+        "r2": 0.9099001727445499
+      },
+      {
+        "fold": 2,
+        "train_samples": 1052,
+        "test_samples": 525,
+        "mae": 55.44481497925353,
+        "rmse": 116.41938295017992,
+        "r2": 0.9053941405819589
+      },
+      {
+        "fold": 3,
+        "train_samples": 1577,
+        "test_samples": 525,
+        "mae": 55.7052596435047,
+        "rmse": 111.7283862381773,
+        "r2": 0.905144981512257
+      },
+      {
+        "fold": 4,
+        "train_samples": 2102,
+        "test_samples": 525,
+        "mae": 58.625857428235605,
+        "rmse": 141.99171926823544,
+        "r2": 0.8332711860951374
+      },
+      {
+        "fold": 5,
+        "train_samples": 2627,
+        "test_samples": 525,
+        "mae": 59.274611594101934,
+        "rmse": 130.7457093869862,
+        "r2": 0.8486284947944925
+      }
+    ],
+    "aggregate": {
+      "mae": 58.64130396400596,
+      "rmse": 125.1609621712145,
+      "r2": 0.8804677951456791
+    }
+  },
+  "feature_importance": {
+    "IRRADIATION": 0.8671430990013451,
+    "Hour": 0.01925560060951402,
+    "MODULE_TEMPERATURE": 0.014638179652207647,
+    "AMBIENT_TEMPERATURE": 0.014739257028921012,
+    "AC_POWER_LAG1": 0.08422386370801226
+  }
+}
