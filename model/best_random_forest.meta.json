@@ -1,0 +1,46 @@
+{
+  "trained_on": "real_data",
+  "trained_at_utc": "2026-11-25T08:06:50+00:00",
+  "model_file": "best_random_forest.pkl",
+  "model_sha256": "09e08c91d951750130596d9eeed3e111bd63bb97a8b3f5ca488a326305f8cddd",
+  "dataset_file": "Plant_1_Merged.csv",
+  "dataset_sha256": "0045bbf502f65150c47c3a507d361092ad3bf56be20e865146668c7f0ccad65f",
+  "inverter": "1BY6WEcLGh8j5v7",
+  "n_samples": 3152,
+  "features": [
+    "IRRADIATION",
+    "Hour",
+    "MODULE_TEMPERATURE",
+    "AMBIENT_TEMPERATURE",
+    "AC_POWER_LAG1"
+  ],
+  "rf_params": {
+    "n_estimators": 200,
+    "max_depth": 12,
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "sklearn_version": "1.5.2",
+  "numpy_version": "1.26.4",
+  "pandas_version": "2.2.2",
+  "cv_aggregate": {
+    "mae": 58.64130396400596,
+    "rmse": 125.16096217121449,
+    "r2": 0.8804677951456791
+  },
+  "holdout_test": {
+    "train_samples": 2521,
+    "test_samples": 631,
+    "train_period": [
+      "2020-05-15 00:15:00",
+      "2020-06-11 09:15:00"
+    ],
+    "test_period": [
+      "2020-06-11 09:30:00",
+      "2020-06-17 23:30:00"
+    ],
+    "mae": 56.151733549959424,
+    "rmse": 122.7670485025844,
+    "r2": 0.863498792902968
+  }
+}

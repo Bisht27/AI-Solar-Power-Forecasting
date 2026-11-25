@@ -16,6 +16,8 @@ substituting an unverified remote artifact).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from typing import Any
 
@@ -30,6 +32,11 @@ DEFAULT_MODEL_PATHS = [
     os.path.join("model", "best_random_forest.pkl"),
     os.path.join("model", "rf_model.pkl"),
 ]
+
+# Set to "1" to deliberately allow the app to serve the synthetic demo
+# placeholder model (UI smoke-testing only). Off by default: without it,
+# load_model() refuses a placeholder instead of silently serving it.
+ALLOW_DEMO_MODEL_ENV = "SOLAR_ALLOW_DEMO_MODEL"
 
 EXPECTED_FEATURE_ORDER = [
     "IRRADIATION",
@@ -95,11 +102,50 @@ def check_feature_schema(model: Any, expected: list[str] | None = None) -> bool:
     return True
 
 
-def load_model(model_path: str | None = None) -> Any:
+def metadata_path_for(model_path: str) -> str:
+    """Path of the provenance sidecar written by scripts/train_model.py."""
+    return os.path.splitext(model_path)[0] + ".meta.json"
+
+
+def load_model_metadata(model_path: str) -> dict | None:
+    """Returns the provenance sidecar for ``model_path``, or None if it is
+    missing/unreadable. Never raises."""
+    try:
+        with open(metadata_path_for(model_path), "r") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def verify_model_provenance(model_path: str, metadata: dict | None = None) -> bool:
+    """True only if a sidecar exists, declares real-data training, and its
+    recorded SHA-256 matches the model file currently on disk (i.e. the
+    file has not been swapped or overwritten since scripts/train_model.py
+    produced it)."""
+    metadata = metadata if metadata is not None else load_model_metadata(model_path)
+    if not metadata or metadata.get("trained_on") != "real_data":
+        return False
+    digest = hashlib.sha256()
+    with open(model_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == metadata.get("model_sha256")
+
+
+def _demo_model_allowed() -> bool:
+    return os.environ.get(ALLOW_DEMO_MODEL_ENV, "").strip() == "1"
+
+
+def load_model(model_path: str | None = None, allow_placeholder: bool | None = None) -> Any:
     """Loads the trained Random Forest model from disk via joblib.
 
+    The synthetic demo placeholder is refused unless ``allow_placeholder``
+    is True (or the SOLAR_ALLOW_DEMO_MODEL=1 environment variable is set),
+    so the app can never silently serve it.
+
     Raises:
-        ModelLoadError: if the file is missing or fails to deserialize.
+        ModelLoadError: if the file is missing, fails to deserialize, or is
+        detected as the synthetic placeholder and demo use was not allowed.
     """
     path = model_path or resolve_model_path()
     try:
@@ -112,8 +158,52 @@ def load_model(model_path: str | None = None) -> Any:
 
     logger.info("Loaded model from %s (%s)", path, type(model).__name__)
     check_feature_schema(model)
+
+    metadata = load_model_metadata(path)
+    if verify_model_provenance(path, metadata):
+        logger.info(
+            "Model provenance verified: trained on real data (%s, %s samples) at %s.",
+            metadata.get("dataset_file"), metadata.get("n_samples"), metadata.get("trained_at_utc"),
+        )
+        recorded = metadata.get("sklearn_version")
+        if recorded:
+            import sklearn
+
+            if recorded != sklearn.__version__:
+                logger.warning(
+                    "Model was trained with scikit-learn %s but %s is installed; "
+                    "unpickling across versions can give wrong results.",
+                    recorded, sklearn.__version__,
+                )
+    else:
+        if metadata is not None:
+            logger.warning(
+                "Provenance sidecar for %s does not match the model file; "
+                "the file changed after training. Falling back to the placeholder heuristic.", path,
+            )
+        if is_placeholder_model(model):
+            if allow_placeholder if allow_placeholder is not None else _demo_model_allowed():
+                logger.warning("Serving the SYNTHETIC DEMO placeholder model (demo use explicitly allowed).")
+            else:
+                raise ModelLoadError(
+                    f"'{path}' is the synthetic demo placeholder model, not a model trained on real "
+                    "solar data, so it was not loaded. Train the real model with "
+                    "`python scripts/train_model.py --input data/Plant_1_Merged.csv`. "
+                    f"(For a UI-only smoke test you can set {ALLOW_DEMO_MODEL_ENV}=1.)"
+                )
     return model
 
+
+
+def describe_model(model_path: str | None = None) -> dict:
+    """Provenance summary for the UI: ``{"verified": bool, "metadata": dict|None}``.
+    Never raises."""
+    try:
+        path = model_path or resolve_model_path()
+        metadata = load_model_metadata(path)
+        return {"verified": verify_model_provenance(path, metadata), "metadata": metadata}
+    except Exception:  # noqa: BLE001
+        return {"verified": False, "metadata": None}
 
 
 def is_placeholder_model(model: Any) -> bool:
