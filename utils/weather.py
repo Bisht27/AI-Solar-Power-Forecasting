@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-REQUEST_TIMEOUT_SECONDS = 8
+REQUEST_TIMEOUT_SECONDS = 25
 
 
 class WeatherServiceError(Exception):
