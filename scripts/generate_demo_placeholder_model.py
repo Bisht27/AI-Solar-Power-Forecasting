@@ -14,10 +14,10 @@ DO NOT:
     performance.
   - Deploy this model to any environment a real user will see predictions
     from.
-  - Confuse this with model/best_random_forest.pkl believing it to be a
-    validated artifact -- if that file was produced by this script, it is
-    a placeholder and must be replaced before the app is used for anything
-    beyond a UI smoke-test.
+  - Confuse its output with the real model. It is written to
+    model/demo_placeholder_model.pkl (never to best_random_forest.pkl), and
+    the app refuses to load a placeholder unless SOLAR_ALLOW_DEMO_MODEL=1
+    is set explicitly.
 
 For a genuine model, use `scripts/train_model.py`, which trains on the real
 historical solar dataset (Plant_1_Merged.csv) using a chronological
@@ -40,7 +40,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
-OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "best_random_forest.pkl")
+# Deliberately NOT model/best_random_forest.pkl: this script must never be able
+# to overwrite the real, genuinely-trained model.
+OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "demo_placeholder_model.pkl")
 FEATURE_COLUMNS = [
     "IRRADIATION",
     "Hour",

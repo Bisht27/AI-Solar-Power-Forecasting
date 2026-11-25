@@ -28,6 +28,7 @@ from utils.helpers import (
 from utils.prediction import (
     ModelLoadError,
     PredictionError,
+    describe_model,
     is_placeholder_model,
     load_model,
     predict_ac_power,
@@ -60,6 +61,18 @@ st.set_page_config(
 def get_model():
     """Loads the trained model once per server process."""
     return load_model()
+
+
+@st.cache_resource(show_spinner=False)
+def model_is_placeholder(_model) -> bool:
+    """Cached placeholder check (the heuristic refits a reference model, so it
+    must not run on every Streamlit rerun)."""
+    return is_placeholder_model(_model)
+
+
+@st.cache_resource(show_spinner=False)
+def get_model_provenance() -> dict:
+    return describe_model()
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -320,8 +333,7 @@ def main() -> None:
     except ModelLoadError as exc:
         status_box.update(label="Model unavailable", state="error")
         st.error(f"⚠️ {exc}")
-        st.caption("Run `python scripts/train_model.py --input data/Plant_1_Merged.csv` to train the real model, "
-                   "or `python scripts/generate_demo_placeholder_model.py` for a UI-only demo model.")
+        st.caption("Run `python scripts/train_model.py --input data/Plant_1_Merged.csv` to train the real model.")
     except PredictionError as exc:
         status_box.update(label="Prediction failed", state="error")
         st.error(f"⚠️ {exc}")
@@ -488,7 +500,8 @@ def main() -> None:
     with m3:
         st.markdown("#### 🧠 Model Information")
         with st.container(border=True):
-            if is_placeholder_model(model):
+            provenance = get_model_provenance()
+            if model_is_placeholder(model):
                 st.warning(
                     "⚠️ This is the SYNTHETIC DEMO placeholder model "
                     "(see scripts/generate_demo_placeholder_model.py), not a "
@@ -497,7 +510,22 @@ def main() -> None:
                     icon="⚠️",
                 )
             st.write("**Model type:** Random Forest Regressor")
-            st.write("**Training date:** _(set by model author)_")
+            meta = provenance.get("metadata") or {}
+            if provenance.get("verified"):
+                st.success(
+                    f"Trained on real solar data ({meta.get('dataset_file')}, "
+                    f"{meta.get('n_samples')} samples).",
+                    icon="✅",
+                )
+                st.write(f"**Training date:** {str(meta.get('trained_at_utc', 'unknown'))[:10]}")
+                holdout = meta.get("holdout_test") or {}
+                if holdout:
+                    st.write(
+                        f"**Held-out test:** MAE {holdout['mae']:.1f}, "
+                        f"RMSE {holdout['rmse']:.1f}, R² {holdout['r2']:.3f}"
+                    )
+            else:
+                st.write("**Training date:** _unknown (no verified training metadata)_")
             st.write("**Number of features:** 5")
             st.write("**Expected input order:**")
             st.code(
@@ -520,7 +548,27 @@ def main() -> None:
                         "importance": model.feature_importances_,
                     }
                 ).sort_values("importance", ascending=False)
-                st.bar_chart(importance_df.set_index("feature"))
+                # Plotly bar chart: pure-Python rendering path that does NOT import
+                # PyArrow/Altair (st.bar_chart serialises via Arrow, which fails on
+                # machines where pyarrow's DLL is blocked by Application Control).
+                fig_imp = go.Figure(
+                    go.Bar(
+                        x=importance_df["importance"],
+                        y=importance_df["feature"],
+                        orientation="h",
+                        marker_color="#16a34a",
+                        hovertemplate="%{y}: %{x:.3f}<extra></extra>",
+                    )
+                )
+                fig_imp.update_layout(
+                    title="Random Forest Feature Importance",
+                    xaxis_title="Feature Importance",
+                    yaxis_title="Features",
+                    yaxis=dict(autorange="reversed"),
+                    height=320,
+                    margin=dict(l=10, r=10, t=50, b=10),
+                )
+                st.plotly_chart(fig_imp, use_container_width=True)
 
     st.markdown("---")
     st.caption(

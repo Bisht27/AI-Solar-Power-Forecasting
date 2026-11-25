@@ -42,14 +42,24 @@ What this script does:
      docs/VERIFICATION_REPORT.md, Part 10); the TimeSeriesSplit folds above,
      not this final refit, are what should be cited for expected
      out-of-sample performance.
+  6b. Also reports a single chronological HELD-OUT TEST evaluation: a model
+     fit on the first 80% of the time series only, scored (MAE / RMSE / R2)
+     on the final 20% it never saw. These are the numbers to quote for
+     out-of-sample accuracy; the shipped model is the final refit above.
   7. Saves the final model to model/best_random_forest.pkl via joblib,
      reloads it, and prints the model type, n_features_in_,
      feature_names_in_, and get_params() so the artifact can be verified.
+  8. Writes model/best_random_forest.meta.json (provenance sidecar: SHA-256
+     of the .pkl and of the training CSV, row count, library versions,
+     metrics). utils/prediction.py uses it to confirm the model on disk is
+     the one this script produced from the real dataset.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import json
 import os
 import sys
@@ -57,6 +67,7 @@ import sys
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
@@ -198,6 +209,77 @@ def run_timeseries_validation(df: pd.DataFrame, n_splits: int = 5) -> dict:
     return {"folds": fold_results, "aggregate": agg}
 
 
+def run_holdout_evaluation(df: pd.DataFrame, test_fraction: float = 0.2) -> dict:
+    """Chronological train/test split (no shuffling): fit on the earliest
+    (1 - test_fraction) of rows, score on the latest test_fraction."""
+    X = df[FEATURE_COLUMNS]
+    y = df[TARGET_COLUMN]
+    split = int(len(df) * (1 - test_fraction))
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+    model = RandomForestRegressor(**RF_PARAMS)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+
+    result = {
+        "train_samples": int(len(X_train)),
+        "test_samples": int(len(X_test)),
+        "train_period": [str(df["DATE_TIME"].iloc[0]), str(df["DATE_TIME"].iloc[split - 1])],
+        "test_period": [str(df["DATE_TIME"].iloc[split]), str(df["DATE_TIME"].iloc[-1])],
+        "mae": float(mean_absolute_error(y_test, predictions)),
+        "rmse": float(np.sqrt(mean_squared_error(y_test, predictions))),
+        "r2": float(r2_score(y_test, predictions)),
+    }
+    print(
+        f"\nHeld-out chronological test ({result['train_samples']} train / "
+        f"{result['test_samples']} test rows, test period "
+        f"{result['test_period'][0]} -> {result['test_period'][1]}):"
+    )
+    print(f"  MAE  : {result['mae']:.3f}")
+    print(f"  RMSE : {result['rmse']:.3f}")
+    print(f"  R2   : {result['r2']:.4f}")
+    return result
+
+
+def sha256_of(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_metadata(model_path: str, csv_path: str, inverter: str, n_samples: int,
+                   validation: dict, holdout: dict) -> str:
+    """Writes the provenance sidecar next to the model (see module docstring)."""
+    meta_path = os.path.splitext(model_path)[0] + ".meta.json"
+    with open(meta_path, "w") as fh:
+        json.dump(
+            {
+                "trained_on": "real_data",
+                "trained_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                "model_file": os.path.basename(model_path),
+                "model_sha256": sha256_of(model_path),
+                "dataset_file": os.path.basename(csv_path),
+                "dataset_sha256": sha256_of(csv_path),
+                "inverter": inverter,
+                "n_samples": n_samples,
+                "features": FEATURE_COLUMNS,
+                "rf_params": RF_PARAMS,
+                "sklearn_version": sklearn.__version__,
+                "numpy_version": np.__version__,
+                "pandas_version": pd.__version__,
+                "cv_aggregate": validation["aggregate"],
+                "holdout_test": holdout,
+            },
+            fh,
+            indent=2,
+        )
+    print(f"Wrote provenance metadata to {os.path.abspath(meta_path)}")
+    return meta_path
+
+
 def train_final_model(df: pd.DataFrame) -> RandomForestRegressor:
     X = df[FEATURE_COLUMNS]
     y = df[TARGET_COLUMN]
@@ -262,11 +344,14 @@ def main() -> None:
     print("=" * 70)
     validation = run_timeseries_validation(df, n_splits=args.n_splits)
 
+    holdout = run_holdout_evaluation(df)
+
     print("\n" + "=" * 70)
     print("TRAINING FINAL MODEL ON ALL AVAILABLE DATA")
     print("=" * 70)
     final_model = train_final_model(df)
     save_and_verify(final_model, args.output)
+    write_metadata(args.output, args.input, args.inverter, len(df), validation, holdout)
 
     importance = dict(zip(FEATURE_COLUMNS, [float(x) for x in final_model.feature_importances_]))
     print("\nDeployment-model feature importance (final refit, impurity-based):")
@@ -282,6 +367,7 @@ def main() -> None:
                 "features": FEATURE_COLUMNS,
                 "rf_params": RF_PARAMS,
                 "validation": validation,
+                "holdout_test": holdout,
                 "feature_importance": importance,
             },
             f,
